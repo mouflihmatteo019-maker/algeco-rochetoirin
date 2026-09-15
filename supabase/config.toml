@@ -1,0 +1,8 @@
+[functions.admin-login]
+verify_jwt = false
+
+[functions.send-booking-notification]
+verify_jwt = false
+
+[functions.send-status-update]
+verify_jwt = false
