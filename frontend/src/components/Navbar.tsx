@@ -5,6 +5,7 @@ const NAV_LINKS = [
   { href: '#caracteristiques', label: 'Équipements' },
   { href: '#usages', label: 'Usages' },
   { href: '#etapes', label: 'Comment ça marche' },
+  { href: '#tarifs', label: 'Tarifs' },
   { href: '#disponibilites', label: 'Disponibilités' },
   { href: '#faq', label: 'FAQ' },
   { href: '#reservation', label: 'Réserver' },

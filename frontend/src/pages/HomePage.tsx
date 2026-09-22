@@ -4,6 +4,7 @@ import Presentation from "@/components/Presentation";
 import Characteristics from "@/components/Characteristics";
 import Uses from "@/components/Uses";
 import HowItWorks from "@/components/HowItWorks";
+import Pricing from "@/components/Pricing";
 import LocationMap from "@/components/LocationMap";
 import AvailabilitySection from "@/components/AvailabilitySection";
 import BookingForm from "@/components/BookingForm";
@@ -19,6 +20,7 @@ export default function HomePage() {
       <Characteristics />
       <Uses />
       <HowItWorks />
+      <Pricing />
       <LocationMap />
       <AvailabilitySection />
 

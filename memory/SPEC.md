@@ -42,8 +42,13 @@ frontend/src/index.css).
 - Auth : POST /auth/login, GET /auth/me, POST /auth/logout.
 
 ## Frontend
-- `/` : site vitrine identique (hero, présentation, équipements, usages, étapes, carte, calendrier
-  vert/rouge, formulaire, FAQ, footer). `/admin` : dashboard (filtres 7 statuts, panneau détail,
+- `/` : site vitrine (hero, présentation, équipements, usages, étapes, **tarifs**, carte, calendrier
+  vert/rouge, formulaire, FAQ, footer). Copy clé : H1 héro « Location d'un espace privatif à
+  Rochetoirin », H2 présentation « Un espace modulable et fonctionnel au coeur du Nord-Isère »,
+  stats **50m² / 15-30 personnes**, CTA appel **04 27 54 29 77** (tel:+33427542977, aussi au footer),
+  section #tarifs : 2h 50 € / demi-journée 90 € / journée 150 € / soirée 120 € / journée+soirée
+  199 € / week-end 329 € (frontend/src/components/Pricing.tsx).
+  `/admin` : dashboard (filtres 7 statuts, panneau détail,
   montant d'acompte, lien de paiement copiable, deadline, accepter/refuser/annuler/confirmer,
   calendrier admin). `/paiement/:id` : page publique de paiement (états : payer / vérification /
   confirmée / expirée / refusée-annulée / en examen).

@@ -16,14 +16,18 @@ export default function Hero() {
             Rochetoirin — Nord-Isère
           </span>
           <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6 text-balance leading-tight">
-            Location d'un espace Algéco fixe à Rochetoirin
+            Location d'un espace privatif à Rochetoirin
           </h1>
           <p className="text-lg sm:text-xl text-white/90 mb-8 max-w-xl leading-relaxed">
             Un espace pratique et modulable pour vos réunions, activités associatives, événements locaux et besoins professionnels ponctuels. Au 36 route de Lyon, 38110 Rochetoirin.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4">
+          <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
             <a href="#reservation" className="btn-primary" data-testid="hero-booking-cta">
               Faire une demande de réservation
+            </a>
+            <a href="tel:+33427542977" className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/30 bg-white/10 backdrop-blur-sm px-6 py-3 text-sm font-semibold text-white transition-all hover:bg-white/20 active:scale-95" data-testid="hero-call-cta">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+              Appeler — 04 27 54 29 77
             </a>
             <a href="#presentation" className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/30 bg-white/10 backdrop-blur-sm px-6 py-3 text-sm font-semibold text-white transition-all hover:bg-white/20 active:scale-95" data-testid="hero-discover-cta">
               Découvrir l'espace

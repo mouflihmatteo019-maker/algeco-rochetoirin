@@ -7,7 +7,7 @@ const FAQ_ITEMS = [
   },
   {
     q: `Combien de personnes peut accueillir l'espace ?`,
-    a: `L'espace peut confortablement accueillir entre 15 et 20 personnes selon la configuration souhaitée (réunion en salle, atelier, etc.).`,
+    a: `L'espace peut confortablement accueillir entre 15 et 30 personnes selon la configuration souhaitée (réunion en salle, atelier, etc.).`,
   },
   {
     q: `Comment réserver l'espace ?`,

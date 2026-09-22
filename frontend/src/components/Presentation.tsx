@@ -8,7 +8,7 @@ export default function Presentation() {
               L'espace
             </span>
             <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-6 text-balance">
-              Un Algéco fixe, modulable et fonctionnel au cœur du Nord-Isère
+              Un espace modulable et fonctionnel au coeur du Nord-Isère
             </h2>
             <div className="space-y-4 text-slate-600 leading-relaxed">
               <p>
@@ -30,11 +30,11 @@ export default function Presentation() {
 
             <div className="grid grid-cols-3 gap-4 mt-8">
               <div className="text-center p-4 rounded-xl bg-slate-50 border border-slate-100">
-                <p className="text-2xl font-bold text-brand-600">~30m²</p>
+                <p className="text-2xl font-bold text-brand-600">50m²</p>
                 <p className="text-xs text-slate-500 mt-1">Surface utile</p>
               </div>
               <div className="text-center p-4 rounded-xl bg-slate-50 border border-slate-100">
-                <p className="text-2xl font-bold text-brand-600">15-20</p>
+                <p className="text-2xl font-bold text-brand-600">15-30</p>
                 <p className="text-xs text-slate-500 mt-1">Personnes</p>
               </div>
               <div className="text-center p-4 rounded-xl bg-slate-50 border border-slate-100">
