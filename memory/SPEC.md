@@ -1,54 +1,73 @@
-# SPEC — Clone du site "ETS Laurent Mathieu — Location espace Algéco Rochetoirin"
+# SPEC — Location espace Algéco Rochetoirin (clone + acompte Stripe)
 
 ## Qu'est-ce que c'est
-Clone exact (demande utilisateur : « recréer exactement ce site ») d'un site vitrine de location
-d'un espace Algéco fixe au 36 route de Lyon, 38110 Rochetoirin, avec demande de réservation en
-ligne et espace administrateur. Source : zip Bolt Supabase (Vite+React) — porté sur la stack du
-pod : **FastAPI + MongoDB** (backend) et **React 19 + TS strict + Tailwind v4** (frontend).
-Design identique : palette brand bleue (#1d5be0), Inter (sans) + Plus Jakarta Sans (display),
-classes utilitaires maison (container-page, btn-primary, btn-secondary, card, input-field,
-label-field) portées dans `frontend/src/index.css` (@theme + @layer components).
+Clone exact d'un site vitrine de location d'un espace Algéco fixe (36 route de Lyon, 38110
+Rochetoirin) avec **demande de réservation en ligne + acompte Stripe** et espace administrateur.
+Stack pod : FastAPI + MongoDB / React 19 + TS strict + Tailwind v4. Design identique à l'original
+(palette brand #1d5be0, Inter + Plus Jakarta Sans, classes .btn-primary/.card/.input-field dans
+frontend/src/index.css).
+
+## Flux de réservation avec acompte (la fonctionnalité clé)
+1. **Client** : formulaire public → statut `nouvelle` (aucun paiement). Email notif à l'entreprise.
+2. **Admin** : peut marquer `a_valider`, puis **Accepter** avec montant d'acompte (défaut 150 €).
+   → statut `en_attente_acompte`, créneau **bloqué 24h** (bloc calendrier `reserved-<start>-<end>`),
+   email au client avec le **lien de paiement** (`APP_URL/paiement/{id}`).
+3. **Client** : page /paiement/{id} (résumé + deadline) → « Payer l'acompte » → **Stripe Checkout**
+   (session créée serveur, montant lu dans la réservation, metadata booking_id).
+4. **Webhook** `POST /api/stripe/webhook` (signature vérifiée) : `checkout.session.completed` →
+   statut **`confirmee`** (idempotent), bloc conservé (créneau indisponible), **emails au client
+   ET à l'entreprise**. Filet de sécurité : GET /api/payments/status/{sid} interroge Stripe et
+   confirme aussi (même garde idempotent).
+5. **Expiration** : option non réglée sous 24h → `expiree` + créneau libéré. Sweep toutes les 60 s
+   (tâche lifespan) + checks paresseux sur les lectures (calendar, bookings, payment-info, checkout).
+6. Autres statuts admin : `refusee` / `annulee` (libèrent le créneau), relance d'option possible
+   depuis refusee/expiree/annulee. Confirmée manuelle possible (« paiement reçu hors ligne »).
 
 ## Données (MongoDB, DB_NAME=app)
-- `booking_requests` : id (uuid str), requested_dates (libellé FR calculé serveur), start_date,
-  end_date, start_time, end_time, need_type (reunion|association|evenement|professionnel|autre),
-  people_count, name, phone, email, message, status (pending|accepted|refused), admin_notes,
-  created_at (UTC aware). Modèle : `backend/models/booking.py` ↔ `frontend/src/lib/types.ts`.
-- `calendar_blocks` : id, start_date, end_date, label, status (blocked|reserved), created_at.
-- `admin_users` : email unique + password_hash (pbkdf2_sha256 via passlib).
+- `booking_requests` : id (uuid), requested_dates (libellé FR serveur), start_date, end_date,
+  start_time, end_time, need_type, people_count, name, phone, email, message, status (7 valeurs),
+  deposit_amount_eur, option_expires_at (UTC aware), paid_at, admin_notes, created_at.
+- `calendar_blocks` : id (`reserved-<start>-<end>` pour les réservations), start_date, end_date,
+  label, status (blocked|reserved), created_at.
+- `payment_transactions` : session_id (unique), booking_id, amount (centimes), currency, status,
+  payment_status, stripe_payment_intent_id, created_at/updated_at.
+- `admin_users` : email unique + password_hash pbkdf2_sha256.
 
-## Routes (toutes sur api_router, préfixe /api)
-- Public : `POST /api/bookings` (crée une demande, statut pending, email propriétaire
-  fire-and-forget), `GET /api/calendar` (blocs triés par start_date).
-- Admin (cookie httpOnly `admin_session`, JWT 7 j — dépendance `require_admin`) :
-  `GET /api/bookings`, `PATCH /api/bookings/{id}/status`, `PATCH /api/bookings/{id}/notes`,
-  `DELETE /api/bookings/{id}`, `POST /api/calendar`, `DELETE /api/calendar/{id}`.
-- Auth : `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`.
-- Accepter une demande crée un bloc `reserved` (plage exacte) ; refuser/remettre en attente/
-  supprimer le retire (logique de l'original, déplacée côté serveur). Email Resend au demandeur
-  à chaque changement de statut. /api/status (template) conservé.
+## Routes (api_router, préfixe /api)
+- Public : POST /bookings, GET /calendar, GET /bookings/{id}/payment-info (sans données perso),
+  POST /payments/checkout, GET /payments/status/{session_id}, POST /stripe/webhook (path exact Flow A).
+- Admin (cookie httpOnly `admin_session`, JWT 7 j, dépendance require_admin) : GET /bookings,
+  PATCH /bookings/{id}/status (body {status, deposit_amount_eur?}), PATCH /bookings/{id}/notes,
+  DELETE /bookings/{id}, POST /calendar, DELETE /calendar/{id}.
+- Auth : POST /auth/login, GET /auth/me, POST /auth/logout.
 
 ## Frontend
-- `/` : HomePage — Navbar (fixe, blanc au scroll), Hero, Presentation (4 photos), Characteristics
-  (6 cartes), Uses (6), HowItWorks (3 étapes), LocationMap (iframe Google Maps),
-  AvailabilitySection (calendrier public vert/rouge), formulaire de réservation, FAQ (accordéon,
-  8 questions), Footer (lien /admin).
-- `/admin` : AdminLogin → AdminDashboard (onglets Demandes + Calendrier admin : filtres par
-  statut, panneau détail, accepter/refuser/en attente, notes internes onBlur, supprimer,
-  blocage de dates). Auth via `useAuth()` de `src/lib/session.ts` (cookie + queryClient.clear()
-  à la déconnexion).
-- Images copiées du zip dans `frontend/public/images/` (image-1.jpeg + 3 UUID.jpg utilisées).
+- `/` : site vitrine identique (hero, présentation, équipements, usages, étapes, carte, calendrier
+  vert/rouge, formulaire, FAQ, footer). `/admin` : dashboard (filtres 7 statuts, panneau détail,
+  montant d'acompte, lien de paiement copiable, deadline, accepter/refuser/annuler/confirmer,
+  calendrier admin). `/paiement/:id` : page publique de paiement (états : payer / vérification /
+  confirmée / expirée / refusée-annulée / en examen).
+- Types : frontend/src/lib/types.ts ↔ backend/models/booking.py (tenir en sync dans la même édition).
+
+## Paiements (Stripe — sandbox réclamable Emergent, Flow A)
+Clés dans backend/.env (STRIPE_SECRET_KEY/PUBLISHABLE_KEY/ACCOUNT_ID/WEBHOOK_SECRET, MODE=test).
+Compte sandbox acct_1UGwQuEMRkPU8TK6 — réclamable via le lien onboarding reçu par email Stripe.
+Taxe : Stripe calcule (+0,5 %/transaction) via automatic_tax avec repli automatique sur
+« aucune aide fiscale » en cas d'erreur de config. Carte test : 4242 4242 4242 4242, péremption
+future, CVC quelconque. Aucune vraie carte n'est débitée en mode test.
 
 ## Emails (Resend)
-Clé dans `backend/.env` (RESEND_API_KEY), expéditeur SENDER_EMAIL=onboarding@resend.dev,
-destinataire notif OWNER_EMAIL. Envoi fire-and-forget (`backend/lib/emails.py`,
-asyncio.to_thread) : une erreur Resend est loguée, ne casse jamais le flux de réservation.
-⚠️ Compte Resend en mode test : il n'envoie qu'aux adresses du compte propriétaire
-(matteomouflih@gmail.com) tant qu'un domaine n'est pas vérifié sur resend.com/domains.
+RESEND_API_KEY + SENDER_EMAIL=onboarding@resend.dev dans backend/.env. OWNER_EMAIL =
+matteomouflih@gmail.com (boîte du compte Resend — la seule recevable en mode test ; mettre une
+adresse du domaine vérifié ensuite). Emails : notif nouvelle demande, acceptation+lien de paiement,
+confirmation paiement (client + entreprise), refus/annulation. Fire-and-forget : construction + envoi
+hors boucle (schedule_email), une erreur ne casse jamais le flux. ⚠️ Mode test Resend : seuls les
+destinataires du compte (matteomouflih@gmail.com) reçoivent — vérifier un domaine pour le reste.
 
-## Données de démo (backend/seed.py, idempotent, relançable)
-3 demandes (Marie Dubois acceptée, Comité des Fêtes en attente, Julien Martin refusée — dates
-relatives à aujourd'hui) + 2 blocs (réservé sur la demande acceptée, "Maintenance" bloquée).
+## Démo (backend/seed.py, idempotent, dates relatives à aujourd'hui)
+4 demandes : nouvelle (Marie Dubois), en_attente_acompte 150 € (Comité des Fêtes, option 20h),
+confirmée (Julien Martin, payée), refusée (Saveurs du Bugey) + blocs calendrier correspondants
++ maintenance bloquée.
 
 ## Rôles / accès
-Un seul rôle admin (cookie de session). Identifiants dans `memory/test_credentials.md`.
+Admin unique (cookie de session). Identifiants : memory/test_credentials.md.

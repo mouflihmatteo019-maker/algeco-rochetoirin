@@ -17,16 +17,27 @@ load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
 from lib.db import client, db, ensure_indexes
+from lib.booking_flow import expire_stale_options
 from routers.auth import router as auth_router
 from routers.bookings import router as bookings_router
 from routers.calendar import router as calendar_router
+from routers.payments import router as payments_router, webhook_router as stripe_webhook_router
 
 
 # Startup runs before the yield, shutdown after it. Add your own setup/teardown here.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.index_task = asyncio.create_task(ensure_indexes())  # background: a big index build must not block boot
+    async def expiry_sweeper():
+        while True:
+            try:
+                await expire_stale_options()  # options d'acompte non réglées sous 24h → expirées
+            except Exception:
+                logger.exception("Balayage d'expiration des options échoué")
+            await asyncio.sleep(60)
+    app.state.expiry_task = asyncio.create_task(expiry_sweeper())
     yield
+    app.state.expiry_task.cancel()
     client.close()
 
 
@@ -67,6 +78,8 @@ async def get_status_checks():
 api_router.include_router(auth_router)
 api_router.include_router(bookings_router)
 api_router.include_router(calendar_router)
+api_router.include_router(payments_router)
+api_router.include_router(stripe_webhook_router)
 
 # Include the router in the main app
 app.include_router(api_router)

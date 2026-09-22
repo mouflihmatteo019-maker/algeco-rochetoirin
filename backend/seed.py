@@ -1,4 +1,4 @@
-"""Idempotent seed: admin account + demo booking requests + demo calendar blocks.
+"""Idempotent seed: admin account + demo bookings (deposit flow) + demo calendar blocks.
 
 Run: cd /app/backend && python seed.py
 """
@@ -11,11 +11,15 @@ from lib.security import hash_password
 ADMIN_EMAIL = "admin@ets-mathieu.fr"
 ADMIN_PASSWORD = "Algeco2024!"
 
-OWNER_EMAIL = "admin@ets-mathieu.fr"
+MONTHS_FR = [
+    "janvier", "février", "mars", "avril", "mai", "juin",
+    "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+]
 
 
-def iso(d: datetime) -> str:
-    return d.strftime("%Y-%m-%d")
+def format_fr(iso_date: str) -> str:
+    d = datetime.strptime(iso_date, "%Y-%m-%d")
+    return f"{d.day} {MONTHS_FR[d.month - 1]} {d.year}"
 
 
 async def seed() -> None:
@@ -35,16 +39,24 @@ async def seed() -> None:
     )
     print(f"admin ready: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
 
-    # ── Demo booking requests (fixed ids → re-runnable) ──
     now = datetime.now(timezone.utc)
-    today = datetime.now(timezone.utc)
+    today = now
 
     def d(offset: int) -> str:
-        return iso(today + timedelta(days=offset))
+        return (today + timedelta(days=offset)).strftime("%Y-%m-%d")
 
+    # ── Nettoyage des anciennes démos (ids fixes) avant réinsertion ──
+    await db.booking_requests.delete_many(
+        {"id": {"$in": ["demo-booking-accepted", "demo-booking-pending", "demo-booking-refused"]}}
+    )
+    await db.calendar_blocks.delete_many(
+        {"id": {"$in": ["demo-block-reserved", "demo-block-maintenance"]}}
+    )
+
+    # ── Démo : couvre les statuts principaux du flux avec acompte ──
     demo_bookings = [
         {
-            "id": "demo-booking-accepted",
+            "id": "demo-booking-nouvelle",
             "requested_dates": f"Du {format_fr(d(10))} au {format_fr(d(11))}",
             "start_date": d(10),
             "end_date": d(11),
@@ -56,12 +68,15 @@ async def seed() -> None:
             "phone": "06 12 34 56 78",
             "email": "marie.dubois@exemple.fr",
             "message": "Réunion trimestrielle d'équipe, besoin d'un vidéoprojecteur si possible.",
-            "status": "accepted",
-            "admin_notes": "Confirmée par téléphone le jour même.",
+            "status": "nouvelle",
+            "deposit_amount_eur": None,
+            "option_expires_at": None,
+            "paid_at": None,
+            "admin_notes": None,
             "created_at": now - timedelta(days=3),
         },
         {
-            "id": "demo-booking-pending",
+            "id": "demo-booking-option",
             "requested_dates": format_fr(d(18)),
             "start_date": d(18),
             "end_date": d(18),
@@ -73,15 +88,18 @@ async def seed() -> None:
             "phone": "07 98 76 54 32",
             "email": "contact@comite-rochetoirin.fr",
             "message": "Assemblée générale annuelle de l'association.",
-            "status": "pending",
-            "admin_notes": None,
+            "status": "en_attente_acompte",
+            "deposit_amount_eur": 150.0,
+            "option_expires_at": now + timedelta(hours=20),  # option en cours
+            "paid_at": None,
+            "admin_notes": "Lien de paiement envoyé, relance prévue si besoin.",
             "created_at": now - timedelta(days=1),
         },
         {
-            "id": "demo-booking-refused",
-            "requested_dates": f"Du {format_fr(d(25))} au {format_fr(d(27))}",
+            "id": "demo-booking-confirmee",
+            "requested_dates": f"Du {format_fr(d(25))} au {format_fr(d(26))}",
             "start_date": d(25),
-            "end_date": d(27),
+            "end_date": d(26),
             "start_time": "08:00",
             "end_time": "20:00",
             "need_type": "professionnel",
@@ -90,29 +108,60 @@ async def seed() -> None:
             "phone": "06 45 67 89 01",
             "email": "j.martin@exemple.fr",
             "message": "Base chantier pendant intervention route de Lyon.",
-            "status": "refused",
-            "admin_notes": "Créneau déjà retenu pour maintenance.",
+            "status": "confirmee",
+            "deposit_amount_eur": 150.0,
+            "option_expires_at": now - timedelta(days=2),
+            "paid_at": now - timedelta(days=2, hours=-1),
+            "admin_notes": "Acompte reçu via Stripe.",
             "created_at": now - timedelta(days=5),
+        },
+        {
+            "id": "demo-booking-refusee",
+            "requested_dates": format_fr(d(30)),
+            "start_date": d(30),
+            "end_date": d(30),
+            "start_time": "10:00",
+            "end_time": "22:00",
+            "need_type": "evenement",
+            "people_count": 35,
+            "name": "Association Les Saveurs du Bugey",
+            "phone": "06 88 44 22 11",
+            "email": "saveursdubugey@exemple.fr",
+            "message": "Repas annuel, 35 personnes attendues.",
+            "status": "refusee",
+            "deposit_amount_eur": None,
+            "option_expires_at": None,
+            "paid_at": None,
+            "admin_notes": "Capacité maximale dépassée (35 pers.).",
+            "created_at": now - timedelta(days=4),
         },
     ]
     for doc in demo_bookings:
         await db.booking_requests.update_one({"id": doc["id"]}, {"$set": doc}, upsert=True)
     print(f"booking_requests: {len(demo_bookings)} demandes de démo")
 
-    # ── Demo calendar blocks ──
+    # ── Blocs calendrier : option (24h) + réservation confirmée + maintenance ──
     demo_blocks = [
         {
-            "id": "demo-block-reserved",
-            "start_date": d(10),
-            "end_date": d(11),
+            "id": f"reserved-{d(18)}-{d(18)}",
+            "start_date": d(18),
+            "end_date": d(18),
+            "label": None,
+            "status": "reserved",
+            "created_at": now - timedelta(days=1),
+        },
+        {
+            "id": f"reserved-{d(25)}-{d(26)}",
+            "start_date": d(25),
+            "end_date": d(26),
             "label": None,
             "status": "reserved",
             "created_at": now - timedelta(days=2),
         },
         {
             "id": "demo-block-maintenance",
-            "start_date": d(25),
-            "end_date": d(27),
+            "start_date": d(40),
+            "end_date": d(42),
             "label": "Maintenance",
             "status": "blocked",
             "created_at": now - timedelta(days=2),
@@ -121,17 +170,6 @@ async def seed() -> None:
     for doc in demo_blocks:
         await db.calendar_blocks.update_one({"id": doc["id"]}, {"$set": doc}, upsert=True)
     print(f"calendar_blocks: {len(demo_blocks)} périodes de démo")
-
-
-def format_fr(iso_date: str) -> str:
-    from datetime import date as _date
-
-    MONTHS = [
-        "janvier", "février", "mars", "avril", "mai", "juin",
-        "juillet", "août", "septembre", "octobre", "novembre", "décembre",
-    ]
-    d = _date.fromisoformat(iso_date)
-    return f"{d.day} {MONTHS[d.month - 1]} {d.year}"
 
 
 if __name__ == "__main__":

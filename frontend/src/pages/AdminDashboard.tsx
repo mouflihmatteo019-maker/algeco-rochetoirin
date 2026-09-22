@@ -3,10 +3,29 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiDelete, apiGet, apiPatch } from '@/lib/api';
 import { useAuth } from '@/lib/session';
 import type { BookingRequest, BookingStatus, CalendarBlock } from '@/lib/types';
-import { NEED_TYPE_LABELS, STATUS_LABELS, STATUS_COLORS } from '@/lib/types';
+import {
+  NEED_TYPE_LABELS,
+  STATUS_LABELS,
+  STATUS_COLORS,
+  formatDateTimeFr,
+  formatEur,
+} from '@/lib/types';
 import AvailabilityCalendar from '@/components/AvailabilityCalendar';
 
 type Tab = 'requests' | 'calendar';
+
+const FILTERS: { key: BookingStatus | 'all'; label: string }[] = [
+  { key: 'all', label: 'Toutes' },
+  { key: 'nouvelle', label: 'Nouvelles' },
+  { key: 'a_valider', label: 'À valider' },
+  { key: 'en_attente_acompte', label: "En attente d'acompte" },
+  { key: 'confirmee', label: 'Confirmées' },
+  { key: 'refusee', label: 'Refusées' },
+  { key: 'expiree', label: 'Expirées' },
+  { key: 'annulee', label: 'Annulées' },
+];
+
+const DEFAULT_DEPOSIT = 150;
 
 export default function AdminDashboard() {
   const { signOut } = useAuth();
@@ -14,6 +33,8 @@ export default function AdminDashboard() {
   const [tab, setTab] = useState<Tab>('requests');
   const [filter, setFilter] = useState<BookingStatus | 'all'>('all');
   const [selectedRequest, setSelectedRequest] = useState<BookingRequest | null>(null);
+  const [depositInput, setDepositInput] = useState<string>(String(DEFAULT_DEPOSIT));
+  const [copied, setCopied] = useState(false);
 
   const requestsQuery = useQuery({
     queryKey: ['bookings'],
@@ -34,11 +55,12 @@ export default function AdminDashboard() {
   };
 
   const updateStatusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: BookingStatus }) =>
-      apiPatch<BookingRequest>(`/bookings/${id}/status`, { status }),
+    mutationFn: ({ id, status, deposit_amount_eur }: { id: string; status: BookingStatus; deposit_amount_eur?: number }) =>
+      apiPatch<BookingRequest>(`/bookings/${id}/status`, { status, deposit_amount_eur }),
     onSuccess: (updated) => {
       refreshAll();
       setSelectedRequest((prev) => (prev && prev.id === updated.id ? updated : prev));
+      setCopied(false);
     },
   });
 
@@ -56,8 +78,8 @@ export default function AdminDashboard() {
     },
   });
 
-  const updateStatus = (id: string, status: BookingStatus) =>
-    updateStatusMutation.mutate({ id, status });
+  const changeStatus = (id: string, status: BookingStatus, deposit_amount_eur?: number) =>
+    updateStatusMutation.mutate({ id, status, deposit_amount_eur });
 
   const updateNotes = (id: string, admin_notes: string) => {
     const req = requests.find((r) => r.id === id);
@@ -67,14 +89,67 @@ export default function AdminDashboard() {
 
   const deleteRequest = (id: string) => deleteRequestMutation.mutate(id);
 
+  const paymentLink = (req: BookingRequest) => `${window.location.origin}/paiement/${req.id}`;
+
+  const copyPaymentLink = (req: BookingRequest) => {
+    navigator.clipboard?.writeText(paymentLink(req)).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   const filteredRequests = filter === 'all' ? requests : requests.filter((r) => r.status === filter);
 
-  const counts = {
-    all: requests.length,
-    pending: requests.filter((r) => r.status === 'pending').length,
-    accepted: requests.filter((r) => r.status === 'accepted').length,
-    refused: requests.filter((r) => r.status === 'refused').length,
-  };
+  const counts = FILTERS.reduce(
+    (acc, f) => {
+      acc[f.key] = f.key === 'all' ? requests.length : requests.filter((r) => r.status === f.key).length;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
+  const canAccept = (s: BookingStatus) =>
+    ['nouvelle', 'a_valider', 'refusee', 'expiree', 'annulee'].includes(s);
+  const canRefuse = (s: BookingStatus) =>
+    ['nouvelle', 'a_valider', 'en_attente_acompte'].includes(s);
+  const canCancel = (s: BookingStatus) => ['en_attente_acompte', 'confirmee'].includes(s);
+
+  const acceptAmount = parseFloat(depositInput.replace(',', '.'));
+
+  const acceptBlock = (req: BookingRequest) => (
+    <div className="mt-4 p-4 rounded-xl bg-brand-50 border border-brand-200">
+      <p className="text-sm font-semibold text-brand-800 mb-2">
+        {req.status === 'en_attente_acompte' || req.status === 'confirmee'
+          ? null
+          : 'Accepter la demande — envoyer le lien de paiement'}
+      </p>
+      <label className="label-field">Montant de l'acompte (€)</label>
+      <div className="flex gap-2">
+        <input
+          type="number"
+          min="0"
+          step="10"
+          value={depositInput}
+          onChange={(e) => setDepositInput(e.target.value)}
+          className="input-field max-w-[140px]"
+          data-testid="admin-deposit-amount-input"
+        />
+        <button
+          onClick={() => changeStatus(req.id, 'en_attente_acompte', acceptAmount)}
+          disabled={updateStatusMutation.isPending || !(acceptAmount > 0)}
+          className="btn-primary text-sm flex-1"
+          data-testid="admin-accept-with-deposit-button"
+        >
+          {updateStatusMutation.isPending
+            ? 'Envoi...'
+            : `Accepter — acompte ${formatEur(acceptAmount)} (option 24h)`}
+        </button>
+      </div>
+      <p className="text-xs text-brand-700/80 mt-2">
+        Le créneau est bloqué 24h et le client reçoit un email avec le lien de paiement sécurisé.
+      </p>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-slate-50" data-testid="admin-dashboard">
@@ -102,7 +177,7 @@ export default function AdminDashboard() {
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === 'requests' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
             data-testid="admin-tab-requests-button"
           >
-            Demandes ({counts.all})
+            Demandes ({counts.all ?? 0})
           </button>
           <button
             onClick={() => setTab('calendar')}
@@ -123,19 +198,14 @@ export default function AdminDashboard() {
         ) : tab === 'requests' ? (
           <div>
             <div className="flex flex-wrap gap-2 mb-6">
-              {([
-                { key: 'all', label: 'Toutes', count: counts.all },
-                { key: 'pending', label: 'En attente', count: counts.pending },
-                { key: 'accepted', label: 'Acceptées', count: counts.accepted },
-                { key: 'refused', label: 'Refusées', count: counts.refused },
-              ] as const).map((f) => (
+              {FILTERS.map((f) => (
                 <button
                   key={f.key}
                   onClick={() => setFilter(f.key)}
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filter === f.key ? 'bg-brand-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                   data-testid={`admin-filter-button-${f.key}`}
                 >
-                  {f.label} ({f.count})
+                  {f.label} ({counts[f.key] ?? 0})
                 </button>
               ))}
             </div>
@@ -150,7 +220,10 @@ export default function AdminDashboard() {
                   {filteredRequests.map((req) => (
                     <button
                       key={req.id}
-                      onClick={() => setSelectedRequest(req)}
+                      onClick={() => {
+                        setSelectedRequest(req);
+                        if (req.deposit_amount_eur) setDepositInput(String(req.deposit_amount_eur));
+                      }}
                       className={`w-full text-left card p-4 transition-all hover:shadow-md ${selectedRequest?.id === req.id ? 'ring-2 ring-brand-500' : ''}`}
                       data-testid={`admin-request-card-${req.id}`}
                     >
@@ -167,6 +240,14 @@ export default function AdminDashboard() {
                         <p><span className="text-slate-400">Dates :</span> {req.requested_dates}</p>
                         <p><span className="text-slate-400">Horaires :</span> {req.start_time} — {req.end_time}</p>
                         <p><span className="text-slate-400">Contact :</span> {req.phone} · {req.email}</p>
+                        {req.deposit_amount_eur != null && (
+                          <p><span className="text-slate-400">Acompte :</span> {formatEur(req.deposit_amount_eur)}</p>
+                        )}
+                        {req.status === 'en_attente_acompte' && req.option_expires_at && (
+                          <p className="text-amber-700 font-medium">
+                            Option jusqu'au {formatDateTimeFr(req.option_expires_at)}
+                          </p>
+                        )}
                       </div>
                       <p className="text-xs text-slate-400 mt-2">
                         {new Date(req.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -198,6 +279,13 @@ export default function AdminDashboard() {
                         <DetailRow label="Nombre de personnes" value={String(selectedRequest.people_count)} />
                         <DetailRow label="Téléphone" value={selectedRequest.phone} />
                         <DetailRow label="Email" value={selectedRequest.email} />
+                        <DetailRow label="Acompte" value={formatEur(selectedRequest.deposit_amount_eur)} />
+                        {selectedRequest.paid_at && (
+                          <DetailRow label="Acompte payé le" value={formatDateTimeFr(selectedRequest.paid_at)} />
+                        )}
+                        {selectedRequest.status === 'en_attente_acompte' && selectedRequest.option_expires_at && (
+                          <DetailRow label="Option (24h) jusqu'au" value={formatDateTimeFr(selectedRequest.option_expires_at)} />
+                        )}
                         {selectedRequest.message && (
                           <div>
                             <p className="text-slate-400 text-xs mb-1">Message</p>
@@ -205,6 +293,39 @@ export default function AdminDashboard() {
                           </div>
                         )}
                       </div>
+
+                      {selectedRequest.status === 'en_attente_acompte' && (
+                        <div className="mt-4 p-4 rounded-xl bg-amber-50 border border-amber-200">
+                          <p className="text-sm font-medium text-amber-800">
+                            Option en cours — créneau bloqué jusqu'au {formatDateTimeFr(selectedRequest.option_expires_at)}.
+                            Passé ce délai, l'option expirera automatiquement et le créneau sera libéré.
+                          </p>
+                          <p className="text-xs text-slate-500 mt-2 mb-1">Lien de paiement du client :</p>
+                          <div className="flex gap-2">
+                            <code className="flex-1 text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 truncate" data-testid="admin-payment-link">
+                              {paymentLink(selectedRequest)}
+                            </code>
+                            <button
+                              onClick={() => copyPaymentLink(selectedRequest)}
+                              className="btn-secondary text-xs whitespace-nowrap"
+                              data-testid="admin-copy-payment-link-button"
+                            >
+                              {copied ? 'Copié !' : 'Copier'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedRequest.status === 'confirmee' && (
+                        <div className="mt-4 p-4 rounded-xl bg-emerald-50 border border-emerald-200">
+                          <p className="text-sm font-medium text-emerald-800" data-testid="admin-confirmed-info">
+                            Acompte reçu{selectedRequest.paid_at ? ` le ${formatDateTimeFr(selectedRequest.paid_at)}` : ''} —
+                            réservation confirmée, créneau indisponible dans le calendrier.
+                          </p>
+                        </div>
+                      )}
+
+                      {canAccept(selectedRequest.status) && acceptBlock(selectedRequest)}
 
                       <div className="mt-4 pt-4 border-t border-slate-100">
                         <label className="label-field">Notes internes</label>
@@ -219,27 +340,42 @@ export default function AdminDashboard() {
                       </div>
 
                       <div className="flex flex-wrap gap-2 mt-4">
-                        <button
-                          onClick={() => updateStatus(selectedRequest.id, 'accepted')}
-                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${selectedRequest.status === 'accepted' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'}`}
-                          data-testid="admin-accept-button"
-                        >
-                          Accepter
-                        </button>
-                        <button
-                          onClick={() => updateStatus(selectedRequest.id, 'refused')}
-                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${selectedRequest.status === 'refused' ? 'bg-rose-600 text-white' : 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'}`}
-                          data-testid="admin-refuse-button"
-                        >
-                          Refuser
-                        </button>
-                        <button
-                          onClick={() => updateStatus(selectedRequest.id, 'pending')}
-                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${selectedRequest.status === 'pending' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'}`}
-                          data-testid="admin-pending-button"
-                        >
-                          En attente
-                        </button>
+                        {selectedRequest.status === 'nouvelle' && (
+                          <button
+                            onClick={() => changeStatus(selectedRequest.id, 'a_valider')}
+                            className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
+                            data-testid="admin-mark-review-button"
+                          >
+                            À valider
+                          </button>
+                        )}
+                        {selectedRequest.status === 'en_attente_acompte' && (
+                          <button
+                            onClick={() => changeStatus(selectedRequest.id, 'confirmee')}
+                            className="px-4 py-2 rounded-lg text-sm font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+                            data-testid="admin-confirm-manual-button"
+                          >
+                            Confirmer (paiement reçu hors ligne)
+                          </button>
+                        )}
+                        {canRefuse(selectedRequest.status) && (
+                          <button
+                            onClick={() => changeStatus(selectedRequest.id, 'refusee')}
+                            className="px-4 py-2 rounded-lg text-sm font-medium bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors"
+                            data-testid="admin-refuse-button"
+                          >
+                            Refuser
+                          </button>
+                        )}
+                        {canCancel(selectedRequest.status) && (
+                          <button
+                            onClick={() => changeStatus(selectedRequest.id, 'annulee')}
+                            className="px-4 py-2 rounded-lg text-sm font-medium bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 transition-colors"
+                            data-testid="admin-cancel-button"
+                          >
+                            Annuler
+                          </button>
+                        )}
                         <button
                           onClick={() => deleteRequest(selectedRequest.id)}
                           className="px-4 py-2 rounded-lg text-sm font-medium text-slate-500 border border-slate-200 hover:bg-slate-100 transition-colors ml-auto"

@@ -1,4 +1,8 @@
-"""Pydantic models mirroring the original site's Supabase tables (src/lib/types.ts)."""
+"""Pydantic models — booking requests with deposit flow (acompte via Stripe).
+
+Statuts : nouvelle / a_valider / en_attente_acompte / confirmee / refusee / expiree / annulee
+Mirrored in frontend/src/lib/types.ts — keep the two in sync in the same edit.
+"""
 from datetime import datetime, timezone
 from typing import Literal, Optional
 from uuid import uuid4
@@ -6,7 +10,15 @@ from uuid import uuid4
 from pydantic import BaseModel, EmailStr, Field
 
 NeedType = Literal["reunion", "association", "evenement", "professionnel", "autre"]
-BookingStatus = Literal["pending", "accepted", "refused"]
+BookingStatus = Literal[
+    "nouvelle",
+    "a_valider",
+    "en_attente_acompte",
+    "confirmee",
+    "refusee",
+    "expiree",
+    "annulee",
+]
 BlockStatus = Literal["blocked", "reserved"]
 
 
@@ -41,17 +53,33 @@ class BookingRequest(BaseModel):
     phone: str
     email: str
     message: Optional[str] = None
-    status: BookingStatus = "pending"
+    status: BookingStatus = "nouvelle"
+    deposit_amount_eur: Optional[float] = None
+    option_expires_at: Optional[datetime] = None  # 24h après acceptation
+    paid_at: Optional[datetime] = None
     admin_notes: Optional[str] = None
     created_at: datetime = Field(default_factory=_aware_utc_now)
 
 
 class BookingStatusUpdate(BaseModel):
     status: BookingStatus
+    deposit_amount_eur: Optional[float] = Field(default=None, ge=0, le=10000)
 
 
 class AdminNotesUpdate(BaseModel):
     admin_notes: str = ""
+
+
+class PaymentInfo(BaseModel):
+    """Vue publique minimale d'une réservation pour la page de paiement."""
+
+    booking_id: str
+    requested_dates: str
+    start_time: str
+    end_time: str
+    status: BookingStatus
+    deposit_amount_eur: Optional[float] = None
+    option_expires_at: Optional[datetime] = None
 
 
 class CalendarBlockCreate(BaseModel):
